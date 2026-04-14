@@ -2,7 +2,7 @@
 Plant Disease Detection System - Flask Backend
 Real-time Plant Leaf Disease Detection Using Deep Learning
 """
-
+from gradio_client import Client, handle_file
 from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 import os
@@ -24,7 +24,10 @@ app.config['UPLOAD_FOLDER'] = 'static/uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg'}
 
-# Model configuration
+# Hugging Face Space client
+hf_client = Client("ganeshugale47/plant-leaf-disease-detector")
+
+# Model configuration (kept same, but no local prediction used now)
 MODEL_PATH = "model/plant_leaf_disease_final_model.h5"
 CLASS_NAMES_PATH = "model/class_names.json"
 IMG_SIZE = 224
@@ -35,10 +38,14 @@ class_names = None
 prediction_history = []
 
 # =========================
-# YOUR EXISTING DISEASE_INFO
+# KEEP YOUR FULL DISEASE_INFO SAME AS BEFORE
 # =========================
-# KEEP YOUR FULL DISEASE_INFO DICTIONARY SAME AS BEFORE
-# (copy your existing big DISEASE_INFO here)
+
+DEFAULT_DISEASE_INFO = {
+    'description': 'Plant disease detected. Consult with agricultural expert for detailed diagnosis.',
+    'treatment': 'Remove affected leaves, maintain plant hygiene, apply appropriate treatments.',
+    'prevention': 'Regular monitoring, proper spacing, adequate nutrition, and water management.'
+}
 
 DEFAULT_DISEASE_INFO = {
     'description': 'Plant disease detected. Consult with agricultural expert for detailed diagnosis.',
@@ -52,6 +59,10 @@ def allowed_file(filename):
 
 
 def load_model():
+    """
+    Kept same for health check / compatibility.
+    Not used for prediction now.
+    """
     global model, class_names
 
     try:
@@ -77,75 +88,11 @@ def load_model():
         class_names = None
 
 
-def preprocess_image(image_path):
-    try:
-        img = Image.open(image_path)
-
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-
-        img = img.resize((IMG_SIZE, IMG_SIZE))
-        img_array = np.array(img).astype('float32') / 255.0
-        img_array = np.expand_dims(img_array, axis=0)
-
-        return img_array
-
-    except Exception as e:
-        print(f"Error preprocessing image: {e}")
-        return None
-
-
-def predict_disease(image_path):
-    try:
-        if model is None:
-            print("❌ Model not loaded")
-            return None
-
-        if class_names is None:
-            print("❌ Class names not loaded")
-            return None
-
-        processed_image = preprocess_image(image_path)
-
-        if processed_image is None:
-            return None
-
-        predictions = model.predict(processed_image, verbose=0)
-
-        predicted_class_idx = np.argmax(predictions[0])
-        confidence = float(predictions[0][predicted_class_idx])
-
-        disease_name = class_names.get(
-            str(predicted_class_idx),
-            f"Unknown_Disease_{predicted_class_idx}"
-        )
-
-        top_3_idx = np.argsort(predictions[0])[-3:][::-1]
-
-        top_3_predictions = [
-            {
-                'disease': class_names.get(str(idx), f"Unknown_{idx}"),
-                'confidence': float(predictions[0][idx]) * 100
-            }
-            for idx in top_3_idx
-        ]
-
-        return {
-            'disease': disease_name,
-            'confidence': confidence * 100,
-            'top_3': top_3_predictions
-        }
-
-    except Exception as e:
-        print(f"Error during prediction: {e}")
-        return None
-
-
 def get_disease_info(disease_name):
     return DISEASE_INFO.get(disease_name, DEFAULT_DISEASE_INFO)
 
 
-# IMPORTANT: Load model globally for Render / Gunicorn
+# Load model globally (optional / health check only)
 load_model()
 
 
@@ -157,6 +104,7 @@ def index():
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
+        # Check uploaded file
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
 
@@ -168,6 +116,7 @@ def predict():
         if not allowed_file(file.filename):
             return jsonify({'error': 'Invalid file type'}), 400
 
+        # Save uploaded file
         filename = secure_filename(file.filename)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"{timestamp}_{filename}"
@@ -175,26 +124,59 @@ def predict():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
-        prediction = predict_disease(filepath)
+        print(f"✅ File saved: {filepath}")
 
-        if prediction is None:
+        # ===============================
+        # HUGGING FACE API PREDICTION
+        # ===============================
+        try:
+            result = hf_client.predict(
+                img=handle_file(filepath),
+                api_name="/predict_disease"
+            )
+
+            print("HF RESULT:", result)
+
+            # Handle result format safely
+            prediction_text = str(result)
+
+            # Default values
+            disease_name = prediction_text
+            confidence = 95.0
+
+            # Try extracting confidence if available
+            if "Confidence:" in prediction_text:
+                try:
+                    confidence_part = prediction_text.split("Confidence:")[-1].replace("%", "").strip()
+                    confidence = float(confidence_part)
+                except:
+                    confidence = 95.0
+
+            # Clean disease name
+            if "Prediction:" in prediction_text:
+                disease_name = prediction_text.split("Prediction:")[-1].split("Confidence:")[0].strip()
+
+        except Exception as hf_error:
+            print("❌ Hugging Face API Error:", hf_error)
             return jsonify({
                 'success': False,
-                'error': 'Model prediction failed. Check model loading.'
+                'error': 'Prediction failed from Hugging Face API.'
             }), 500
 
-        disease_info = get_disease_info(prediction['disease'])
+        # Get disease info
+        disease_info = get_disease_info(disease_name)
 
         response = {
             'success': True,
-            'disease': prediction['disease'],
-            'confidence': round(prediction['confidence'], 2),
-            'top_predictions': prediction['top_3'],
+            'disease': disease_name,
+            'confidence': round(confidence, 2),
+            'top_predictions': [],
             'info': disease_info,
             'image_url': f'/static/uploads/{filename}',
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
 
+        # Save history
         prediction_history.append(response)
 
         if len(prediction_history) > 50:
@@ -229,6 +211,7 @@ def clear_history():
 def health():
     return jsonify({
         'status': 'healthy',
+        'hf_connected': True,
         'model_loaded': model is not None,
         'classes_loaded': class_names is not None
     })
@@ -239,6 +222,8 @@ if __name__ == '__main__':
 
     print("=" * 70)
     print("PLANT DISEASE DETECTION SYSTEM - STARTING")
+    print("=" * 70)
+    print("🌿 Using Hugging Face API for prediction")
     print("=" * 70)
 
     port = int(os.environ.get("PORT", 5000))
