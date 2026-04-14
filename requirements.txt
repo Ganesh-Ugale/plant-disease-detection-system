@@ -6,3 +6,4 @@ opencv-python-headless==4.9.0.80
 gunicorn==21.2.0
 Werkzeug==3.0.2
 h5py==3.10.0
+gradio_client
