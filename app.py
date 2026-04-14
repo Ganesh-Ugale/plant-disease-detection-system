@@ -41,10 +41,14 @@ prediction_history = []
 # KEEP YOUR FULL DISEASE_INFO SAME AS BEFORE
 # =========================
 
-DEFAULT_DISEASE_INFO = {
-    'description': 'Plant disease detected. Consult with agricultural expert for detailed diagnosis.',
-    'treatment': 'Remove affected leaves, maintain plant hygiene, apply appropriate treatments.',
-    'prevention': 'Regular monitoring, proper spacing, adequate nutrition, and water management.'
+DISEASE_INFO = {
+    # Paste your old full disease info dictionary here
+    # Example:
+    "Tomato Late blight": {
+        "description": "Dark greasy lesions on leaves.",
+        "treatment": "Copper-based fungicides.",
+        "prevention": "Avoid wet foliage."
+    }
 }
 
 DEFAULT_DISEASE_INFO = {
