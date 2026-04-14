@@ -384,6 +384,8 @@ def get_disease_info(disease_name):
     """Get disease information"""
     return DISEASE_INFO.get(disease_name, DEFAULT_DISEASE_INFO)
 
+# Load model when app starts (for Render / Gunicorn)
+load_model()
 
 @app.route('/')
 def index():
@@ -478,20 +480,16 @@ def health():
 
 
 if __name__ == '__main__':
-    # Create upload folder if it doesn't exist
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    
-    # Load model
+
     print("="*70)
     print("PLANT DISEASE DETECTION SYSTEM - STARTING")
     print("="*70)
-    load_model()
-    
-    # Start Flask app
+
     print("\n🌿 Starting Flask application...")
     print("📡 Server running at: http://localhost:5000")
     print("🛑 Press CTRL+C to stop\n")
     print("="*70)
-    
+
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
