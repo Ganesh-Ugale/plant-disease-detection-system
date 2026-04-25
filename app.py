@@ -7,10 +7,7 @@ from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 import os
 import json
-import numpy as np
-from PIL import Image
 from datetime import datetime
-import tensorflow as tf
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -27,77 +24,250 @@ app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg'}
 # Hugging Face Space client
 hf_client = Client("ganeshugale47/plant-leaf-disease-detector")
 
-# Model configuration (kept same, but no local prediction used now)
-MODEL_PATH = "model/plant_leaf_disease_final_model.h5"
-CLASS_NAMES_PATH = "model/class_names.json"
-IMG_SIZE = 224
-
 # Global variables
-model = None
-class_names = None
 prediction_history = []
 
 # =========================
-# KEEP YOUR FULL DISEASE_INFO SAME AS BEFORE
+# FULL DISEASE INFO - All 38 Classes
+# Keys match exactly what HF API returns after formatting
 # =========================
 
 DISEASE_INFO = {
-    # Paste your old full disease info dictionary here
-    # Example:
-    "Tomato Late blight": {
-        "description": "Dark greasy lesions on leaves.",
-        "treatment": "Copper-based fungicides.",
-        "prevention": "Avoid wet foliage."
+    "Apple   Apple scab": {
+        "description": "Apple scab is a fungal disease caused by Venturia inaequalis. It appears as dark, olive-green to brown spots on leaves and fruit surfaces, leading to premature leaf drop and reduced fruit quality.",
+        "treatment": "Apply fungicides such as captan, myclobutanil, or mancozeb during early spring. Remove and destroy infected leaves and fruit. Prune trees to improve air circulation.",
+        "prevention": "Plant scab-resistant apple varieties. Rake and remove fallen leaves in autumn. Apply protective fungicide sprays starting at green tip stage in spring."
+    },
+    "Apple   Black rot": {
+        "description": "Black rot is caused by the fungus Botryosphaeria obtusa. It causes circular brown lesions on leaves with purple borders, rotting fruit with concentric rings, and cankers on branches.",
+        "treatment": "Remove mummified fruits and infected branches. Apply copper-based fungicides or captan. Prune out all cankered wood at least 15cm below the visible infection.",
+        "prevention": "Maintain good orchard sanitation. Remove dead wood and mummified fruit. Avoid wounding trees. Ensure proper tree nutrition to reduce susceptibility."
+    },
+    "Apple   Cedar apple rust": {
+        "description": "Cedar apple rust is caused by Gymnosporangium juniperi-virginianae. Yellow-orange spots appear on upper leaf surfaces in spring, with tube-like structures on the undersides. It requires both apple and cedar/juniper trees to complete its life cycle.",
+        "treatment": "Apply fungicides containing myclobutanil, mancozeb, or sulfur at 7-10 day intervals starting at pink bud stage. Continue through petal fall.",
+        "prevention": "Remove nearby cedar or juniper trees if possible. Plant rust-resistant apple varieties. Apply preventive fungicide sprays in early spring."
+    },
+    "Apple   healthy": {
+        "description": "The apple plant appears healthy with no visible signs of disease or pest damage. Leaves are green and vibrant.",
+        "treatment": "No treatment needed. Continue regular maintenance and monitoring.",
+        "prevention": "Maintain proper watering, fertilization, and pruning schedules. Monitor regularly for early signs of disease or pests."
+    },
+    "Blueberry   healthy": {
+        "description": "The blueberry plant appears healthy with no visible signs of disease or pest damage.",
+        "treatment": "No treatment needed. Continue regular care and monitoring.",
+        "prevention": "Maintain acidic soil pH (4.5-5.5), proper irrigation, and annual pruning. Monitor regularly for early signs of disease."
+    },
+    "Cherry  including sour    Powdery mildew": {
+        "description": "Powdery mildew on cherry is caused by Podosphaera clandestina. It appears as white powdery coating on young leaves, shoots, and fruit, causing leaf distortion, premature defoliation, and reduced fruit quality.",
+        "treatment": "Apply sulfur-based fungicides, potassium bicarbonate, or myclobutanil at first sign of infection. Remove and destroy infected plant parts.",
+        "prevention": "Plant resistant varieties. Ensure good air circulation by proper pruning. Avoid excessive nitrogen fertilization. Apply preventive sprays in spring."
+    },
+    "Cherry  including sour    healthy": {
+        "description": "The cherry plant appears healthy with no visible signs of disease or pest damage.",
+        "treatment": "No treatment needed. Continue regular care and monitoring.",
+        "prevention": "Maintain proper pruning for air circulation, adequate water, and balanced fertilization. Monitor regularly for early signs of disease."
+    },
+    "Corn  maize    Cercospora leaf spot Gray leaf spot": {
+        "description": "Gray leaf spot is caused by Cercospora zeae-maydis. It produces rectangular, tan to gray lesions with parallel edges running between leaf veins. Severe infections can cause significant yield loss.",
+        "treatment": "Apply fungicides containing azoxystrobin, propiconazole, or pyraclostrobin when disease first appears. Ensure good field drainage.",
+        "prevention": "Plant resistant hybrids. Practice crop rotation with non-host crops for at least 2 years. Till crop residue to reduce inoculum. Avoid planting in fields with history of severe infection."
+    },
+    "Corn  maize    Common rust ": {
+        "description": "Common rust is caused by Puccinia sorghi. It produces small, circular to elongated, golden-brown to dark brown pustules on both leaf surfaces. Heavy infection causes leaves to yellow and die prematurely.",
+        "treatment": "Apply foliar fungicides such as azoxystrobin or propiconazole if infection is severe and occurs before silking. Economic treatment is rarely needed if resistant hybrids are planted.",
+        "prevention": "Plant rust-resistant corn hybrids. Monitor fields regularly during the growing season. Early planting can help avoid peak rust pressure periods."
+    },
+    "Corn  maize    Northern Leaf Blight": {
+        "description": "Northern Leaf Blight is caused by Exserohilum turcicum. It produces long, cigar-shaped, grayish-green to tan lesions (2.5-15 cm) on leaves. Severe infection can cause significant yield reduction.",
+        "treatment": "Apply fungicides containing propiconazole, azoxystrobin, or tebuconazole at early disease onset, especially before tasseling. Focus on protecting upper leaves.",
+        "prevention": "Plant resistant hybrids. Practice crop rotation. Till or incorporate crop residue. Avoid fields with history of severe NLB infection."
+    },
+    "Corn  maize    healthy": {
+        "description": "The corn plant appears healthy with no visible signs of disease or pest damage.",
+        "treatment": "No treatment needed. Continue regular care and monitoring.",
+        "prevention": "Practice crop rotation, use certified seeds, maintain soil health, and monitor regularly for early signs of disease or pests."
+    },
+    "Grape   Black rot": {
+        "description": "Black rot of grape is caused by Guignardia bidwellii. It causes tan or brown circular lesions with dark borders on leaves, and infected berries shrivel into hard, black mummies.",
+        "treatment": "Apply fungicides containing myclobutanil, mancozeb, or captan starting at budbreak and continuing through berry development. Remove and destroy mummified berries and infected canes.",
+        "prevention": "Remove all mummified fruit and infected material during dormant pruning. Improve air circulation by proper training and pruning. Apply protective fungicides starting at budbreak."
+    },
+    "Grape   Esca  Black Measles ": {
+        "description": "Esca (Black Measles) is a complex fungal disease caused by several wood-rotting fungi. It produces tiger-stripe patterns of yellow and brown on leaves, and dark spots on berry skin giving a measles-like appearance. It can cause sudden vine death (apoplexy).",
+        "treatment": "There is no cure for infected vines. Remove and destroy severely infected vines. Protect pruning wounds with fungicide paste or sealant. Some trunk renewal techniques may help.",
+        "prevention": "Make clean pruning cuts during dry weather. Treat pruning wounds immediately with wound protectants. Avoid large pruning cuts. Use healthy certified planting material."
+    },
+    "Grape   Leaf blight  Isariopsis Leaf Spot ": {
+        "description": "Leaf blight (Isariopsis Leaf Spot) is caused by Pseudocercospora vitis. It produces dark brown, angular spots on leaves, often surrounded by yellow halos. Severe infection leads to early defoliation.",
+        "treatment": "Apply copper-based fungicides or mancozeb at the first sign of symptoms. Ensure good coverage of leaf undersides. Repeat applications every 10-14 days during wet conditions.",
+        "prevention": "Improve air circulation through canopy management. Remove and destroy fallen infected leaves. Apply preventive copper sprays during the growing season."
+    },
+    "Grape   healthy": {
+        "description": "The grape vine appears healthy with no visible signs of disease or pest damage.",
+        "treatment": "No treatment needed. Continue regular care and monitoring.",
+        "prevention": "Maintain proper canopy management, balanced nutrition, and regular monitoring for early signs of disease or pests."
+    },
+    "Orange   Haunglongbing  Citrus greening ": {
+        "description": "Huanglongbing (HLB) or Citrus Greening is a devastating bacterial disease caused by Candidatus Liberibacter asiaticus, spread by the Asian citrus psyllid. Symptoms include blotchy mottling of leaves, lopsided bitter fruit, and tree decline. There is no cure.",
+        "treatment": "There is no effective cure. Remove and destroy infected trees to prevent spread. Control the Asian citrus psyllid vector with insecticides. Nutritional sprays may temporarily improve tree health.",
+        "prevention": "Use certified disease-free nursery stock. Control Asian citrus psyllid populations with systemic insecticides. Monitor trees regularly for psyllids and early symptoms. Quarantine new plants."
+    },
+    "Peach   Bacterial spot": {
+        "description": "Bacterial spot on peach is caused by Xanthomonas arboricola pv. pruni. It causes water-soaked spots on leaves that turn brown and fall out giving a shot-hole appearance. It also causes sunken dark lesions on fruit.",
+        "treatment": "Apply copper-based bactericides starting at budbreak and continue through the season at 7-14 day intervals. Avoid wounding trees. Remove severely infected fruit.",
+        "prevention": "Plant resistant varieties. Apply copper sprays preventively. Avoid overhead irrigation. Maintain good tree vigor with balanced fertilization. Prune to improve air circulation."
+    },
+    "Peach   healthy": {
+        "description": "The peach tree appears healthy with no visible signs of disease or pest damage.",
+        "treatment": "No treatment needed. Continue regular care and monitoring.",
+        "prevention": "Maintain proper pruning, balanced nutrition, and adequate irrigation. Monitor regularly for early signs of disease or pests."
+    },
+    "Pepper, bell   Bacterial spot": {
+        "description": "Bacterial spot on bell pepper is caused by Xanthomonas campestris pv. vesicatoria. It causes small, water-soaked spots on leaves that turn brown with yellow halos, and raised or sunken scabby spots on fruit.",
+        "treatment": "Apply copper-based bactericides mixed with mancozeb at first sign of disease. Repeat every 5-7 days during wet conditions. Remove and destroy heavily infected plants.",
+        "prevention": "Use certified disease-free seed. Plant resistant varieties. Avoid overhead irrigation. Practice 2-3 year crop rotation. Disinfect tools and equipment."
+    },
+    "Pepper, bell   healthy": {
+        "description": "The bell pepper plant appears healthy with no visible signs of disease or pest damage.",
+        "treatment": "No treatment needed. Continue regular care and monitoring.",
+        "prevention": "Practice crop rotation, use disease-free seeds, maintain proper spacing for air circulation, and monitor regularly."
+    },
+    "Potato   Early blight": {
+        "description": "Early blight of potato is caused by Alternaria solani. It produces dark brown to black lesions with concentric rings (target board pattern) on older leaves first, causing yellowing and defoliation from the bottom of the plant upward.",
+        "treatment": "Apply fungicides containing chlorothalonil, mancozeb, or azoxystrobin at first sign of disease. Repeat every 7-10 days. Destroy infected plant debris after harvest.",
+        "prevention": "Use certified disease-free seed potatoes. Practice 3-4 year crop rotation. Maintain adequate plant nutrition, especially potassium. Apply mulch to prevent soil splash. Avoid overhead irrigation."
+    },
+    "Potato   Late blight": {
+        "description": "Late blight is caused by Phytophthora infestans, the same pathogen that caused the Irish Potato Famine. It produces water-soaked, pale green to brown lesions on leaves with white fuzzy growth on undersides in humid conditions. It can destroy an entire crop rapidly.",
+        "treatment": "Apply fungicides containing chlorothalonil, mancozeb, or metalaxyl immediately at first sign of disease. In severe cases, destroy infected plants to prevent spread. Do not store infected tubers.",
+        "prevention": "Plant resistant varieties. Use certified disease-free seed. Apply preventive fungicides during cool, wet weather. Destroy volunteer potato plants. Ensure good field drainage. Avoid overhead irrigation."
+    },
+    "Potato   healthy": {
+        "description": "The potato plant appears healthy with no visible signs of disease or pest damage.",
+        "treatment": "No treatment needed. Continue regular care and monitoring.",
+        "prevention": "Use certified seed potatoes, practice crop rotation, maintain proper soil drainage, and monitor regularly for early signs of disease."
+    },
+    "Raspberry   healthy": {
+        "description": "The raspberry plant appears healthy with no visible signs of disease or pest damage.",
+        "treatment": "No treatment needed. Continue regular care and monitoring.",
+        "prevention": "Maintain proper pruning to remove old canes, ensure good drainage, and monitor regularly for early signs of disease or pests."
+    },
+    "Soybean   healthy": {
+        "description": "The soybean plant appears healthy with no visible signs of disease or pest damage.",
+        "treatment": "No treatment needed. Continue regular care and monitoring.",
+        "prevention": "Practice crop rotation, use certified disease-free seeds, maintain proper plant spacing, and monitor regularly."
+    },
+    "Squash   Powdery mildew": {
+        "description": "Powdery mildew on squash is caused by Podosphaera xanthii. It appears as white, powdery fungal growth on leaf surfaces, stems, and sometimes fruit. Infected leaves turn yellow and die, reducing plant vigor and yield.",
+        "treatment": "Apply potassium bicarbonate, sulfur-based fungicides, or neem oil at first sign of infection. Remove severely infected leaves. Apply fungicide to leaf undersides as well.",
+        "prevention": "Plant resistant varieties. Ensure good air circulation with proper spacing. Avoid overhead watering. Apply preventive sprays during warm, dry weather when humidity is high."
+    },
+    "Strawberry   Leaf scorch": {
+        "description": "Leaf scorch on strawberry is caused by Diplocarpon earlianum. It produces small, irregular dark purple spots on leaves that expand and coalesce, giving leaves a scorched appearance. Severe infection causes defoliation and reduced plant vigor.",
+        "treatment": "Apply fungicides containing captan or myclobutanil at first sign of disease. Remove and destroy infected leaves. Avoid overhead irrigation.",
+        "prevention": "Plant resistant varieties. Use certified disease-free plants. Improve air circulation by proper plant spacing. Remove old leaves in early spring before new growth begins."
+    },
+    "Strawberry   healthy": {
+        "description": "The strawberry plant appears healthy with no visible signs of disease or pest damage.",
+        "treatment": "No treatment needed. Continue regular care and monitoring.",
+        "prevention": "Use certified disease-free plants, practice proper spacing for air circulation, avoid overhead irrigation, and remove old foliage regularly."
+    },
+    "Tomato   Bacterial spot": {
+        "description": "Bacterial spot on tomato is caused by Xanthomonas campestris pv. vesicatoria. It produces small, water-soaked spots on leaves that turn dark brown with yellow halos. Fruit develops raised, scabby spots reducing marketability.",
+        "treatment": "Apply copper-based bactericides combined with mancozeb at first sign of disease every 5-7 days during wet weather. Remove and destroy heavily infected plant material.",
+        "prevention": "Use certified disease-free seed. Plant resistant varieties. Avoid overhead irrigation. Practice 2-year crop rotation. Disinfect garden tools. Avoid working in wet fields."
+    },
+    "Tomato   Early blight": {
+        "description": "Early blight of tomato is caused by Alternaria solani. It produces dark brown concentric ring lesions (bull's-eye pattern) on older leaves, causing yellowing and defoliation from the bottom upward. It can also affect stems and fruit.",
+        "treatment": "Apply fungicides containing chlorothalonil, mancozeb, or copper at first sign of symptoms. Repeat every 7-10 days. Remove infected lower leaves. Stake plants to improve air circulation.",
+        "prevention": "Use resistant varieties. Practice 3-year crop rotation. Mulch around plants to prevent soil splash. Avoid overhead watering. Maintain adequate potassium levels in soil."
+    },
+    "Tomato   Late blight": {
+        "description": "Late blight on tomato is caused by Phytophthora infestans. It produces large, greasy, dark brown water-soaked lesions on leaves and stems with white fuzzy growth on undersides. It can destroy plants within days under cool, wet conditions.",
+        "treatment": "Apply fungicides containing chlorothalonil, mancozeb, or copper-based products immediately at first sign. In severe outbreaks, remove and destroy all infected plants to prevent spread.",
+        "prevention": "Plant resistant varieties. Apply preventive fungicides during cool, wet weather. Avoid overhead irrigation. Destroy volunteer tomato plants. Ensure good air circulation."
+    },
+    "Tomato   Leaf Mold": {
+        "description": "Leaf mold is caused by Passalora fulva (formerly Fulvia fulva). It causes pale green to yellow spots on upper leaf surfaces with olive-green to brown velvety fungal growth on undersides. It thrives in high humidity greenhouses.",
+        "treatment": "Apply fungicides containing chlorothalonil, mancozeb, or copper at first sign of disease. Reduce humidity by improving ventilation. Remove and destroy infected leaves.",
+        "prevention": "Maintain greenhouse humidity below 85%. Ensure good ventilation and air circulation. Plant resistant varieties. Avoid overhead irrigation. Remove plant debris promptly."
+    },
+    "Tomato   Septoria leaf spot": {
+        "description": "Septoria leaf spot is caused by Septoria lycopersici. It produces small, circular spots with dark brown borders and light gray centers with tiny dark specks (pycnidia) on lower leaves, spreading upward causing severe defoliation.",
+        "treatment": "Apply fungicides containing chlorothalonil, mancozeb, or copper at first sign of disease every 7-10 days. Remove and destroy infected lower leaves to slow spread.",
+        "prevention": "Practice 3-year crop rotation. Mulch plants to prevent soil splash. Avoid overhead watering. Remove and destroy plant debris at end of season. Stake plants to improve air flow."
+    },
+    "Tomato   Spider mites Two spotted spider mite": {
+        "description": "Two-spotted spider mites (Tetranychus urticae) cause stippling (tiny yellow dots) on leaf surfaces, with fine webbing visible under leaves. Severe infestations cause leaves to turn bronze, yellow, and drop, significantly reducing yield.",
+        "treatment": "Apply miticides such as abamectin or bifenazate. Insecticidal soap or neem oil can be effective for light infestations. Spray leaf undersides thoroughly. Repeat applications every 5-7 days.",
+        "prevention": "Maintain adequate plant hydration as drought-stressed plants are more susceptible. Introduce natural predators like predatory mites. Avoid excessive nitrogen fertilization. Monitor plants regularly."
+    },
+    "Tomato   Target Spot": {
+        "description": "Target spot on tomato is caused by Corynespora cassiicola. It produces brown lesions with concentric rings (target pattern) on leaves, and can also affect stems and fruit with similar ring patterns. It causes defoliation in severe cases.",
+        "treatment": "Apply fungicides containing chlorothalonil, azoxystrobin, or mancozeb at first sign of disease. Remove infected plant material. Improve air circulation by pruning.",
+        "prevention": "Plant resistant varieties. Ensure proper plant spacing for good air circulation. Avoid overhead irrigation. Practice crop rotation. Remove plant debris at end of season."
+    },
+    "Tomato   Tomato Yellow Leaf Curl Virus": {
+        "description": "Tomato Yellow Leaf Curl Virus (TYLCV) is transmitted by the silverleaf whitefly (Bemisia tabaci). Infected plants show yellowing and upward curling of young leaves, severe stunting, and little to no fruit production.",
+        "treatment": "There is no cure for virus-infected plants. Remove and destroy infected plants promptly to prevent spread. Control whitefly populations with insecticides (imidacloprid, thiamethoxam) or reflective mulches.",
+        "prevention": "Plant TYLCV-resistant varieties. Control whitefly populations early using sticky yellow traps, insecticides, or neem oil. Use reflective mulches. Install insect screens in greenhouses. Remove weed hosts."
+    },
+    "Tomato   Tomato mosaic virus": {
+        "description": "Tomato Mosaic Virus (ToMV) causes mottled light and dark green mosaic patterns on leaves, leaf distortion, stunted growth, and reduced fruit quality with internal browning. It spreads through contact with infected plants and tools.",
+        "treatment": "There is no cure for virus-infected plants. Remove and destroy infected plants. Disinfect all tools and hands after handling plants. Avoid tobacco products near plants as they can be a source of virus.",
+        "prevention": "Use certified virus-free seed. Plant resistant varieties. Disinfect tools with 10% bleach solution. Wash hands thoroughly before handling plants. Control aphid populations which can spread the virus."
+    },
+    "Tomato   healthy": {
+        "description": "The tomato plant appears healthy with no visible signs of disease or pest damage. Leaves are green and vibrant.",
+        "treatment": "No treatment needed. Continue regular maintenance and monitoring.",
+        "prevention": "Practice crop rotation, maintain proper spacing, use disease-free seeds, ensure balanced fertilization, and monitor regularly for early signs of disease or pests."
     }
 }
-
-DEFAULT_DISEASE_INFO = {
-    'description': 'Plant disease detected. Consult with agricultural expert for detailed diagnosis.',
-    'treatment': 'Remove affected leaves, maintain plant hygiene, apply appropriate treatments.',
-    'prevention': 'Regular monitoring, proper spacing, adequate nutrition, and water management.'
-}
-
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 
-def load_model():
+def normalize_disease_name(name):
     """
-    Kept same for health check / compatibility.
-    Not used for prediction now.
+    Normalize disease name from HF API output to match DISEASE_INFO keys.
+    Handles triple underscores, single underscores, and various formats.
     """
-    global model, class_names
-
-    try:
-        if os.path.exists(MODEL_PATH):
-            print("Loading model from:", MODEL_PATH)
-            model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-            print("✅ Model loaded successfully!")
-        else:
-            print("❌ Model file not found:", MODEL_PATH)
-            model = None
-
-        if os.path.exists(CLASS_NAMES_PATH):
-            with open(CLASS_NAMES_PATH, 'r') as f:
-                class_names = json.load(f)
-            print(f"✅ Loaded {len(class_names)} class names")
-        else:
-            print("❌ Class names file not found")
-            class_names = None
-
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
-        model = None
-        class_names = None
+    # Replace triple underscores with ' - ' style spacing used in dict keys
+    name = name.replace('___', '   ')
+    # Replace remaining single underscores with spaces
+    name = name.replace('_', ' ')
+    # Strip extra whitespace
+    name = name.strip()
+    return name
 
 
 def get_disease_info(disease_name):
-    return DISEASE_INFO.get(disease_name, DEFAULT_DISEASE_INFO)
+    """
+    Try to find disease info, with fallback fuzzy matching.
+    """
+    # Direct lookup first
+    if disease_name in DISEASE_INFO:
+        return DISEASE_INFO[disease_name]
 
+    # Try normalized name
+    normalized = normalize_disease_name(disease_name)
+    if normalized in DISEASE_INFO:
+        return DISEASE_INFO[normalized]
 
-# Load model globally (optional / health check only)
-load_model()
+    # Try case-insensitive match
+    lower = normalized.lower()
+    for key in DISEASE_INFO:
+        if key.lower() == lower:
+            return DISEASE_INFO[key]
+
+    # Partial match fallback
+    for key in DISEASE_INFO:
+        if lower in key.lower() or key.lower() in lower:
+            return DISEASE_INFO[key]
+
+    return DEFAULT_DISEASE_INFO
 
 
 @app.route('/')
@@ -108,7 +278,6 @@ def index():
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
-        # Check uploaded file
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
 
@@ -118,16 +287,14 @@ def predict():
             return jsonify({'error': 'No file selected'}), 400
 
         if not allowed_file(file.filename):
-            return jsonify({'error': 'Invalid file type'}), 400
+            return jsonify({'error': 'Invalid file type. Please upload JPG, PNG, or JPEG.'}), 400
 
         # Save uploaded file
         filename = secure_filename(file.filename)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"{timestamp}_{filename}"
-
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-
         print(f"✅ File saved: {filepath}")
 
         # ===============================
@@ -141,14 +308,11 @@ def predict():
 
             print("HF RESULT:", result)
 
-            # Handle result format safely
             prediction_text = str(result)
-
-            # Default values
             disease_name = prediction_text
             confidence = 95.0
 
-            # Try extracting confidence if available
+            # Extract confidence if available
             if "Confidence:" in prediction_text:
                 try:
                     confidence_part = prediction_text.split("Confidence:")[-1].replace("%", "").strip()
@@ -156,7 +320,7 @@ def predict():
                 except:
                     confidence = 95.0
 
-            # Clean disease name
+            # Extract disease name if available
             if "Prediction:" in prediction_text:
                 disease_name = prediction_text.split("Prediction:")[-1].split("Confidence:")[0].strip()
 
@@ -164,15 +328,19 @@ def predict():
             print("❌ Hugging Face API Error:", hf_error)
             return jsonify({
                 'success': False,
-                'error': 'Prediction failed from Hugging Face API.'
+                'error': 'Prediction failed. The AI model may be temporarily unavailable. Please try again.'
             }), 500
 
-        # Get disease info
+        # Normalize and get disease info
+        normalized_name = normalize_disease_name(disease_name)
         disease_info = get_disease_info(disease_name)
+
+        print(f"Disease: {disease_name} → Normalized: {normalized_name}")
+        print(f"Info found: {'✅ Specific' if disease_info != DEFAULT_DISEASE_INFO else '⚠️ Default fallback'}")
 
         response = {
             'success': True,
-            'disease': disease_name,
+            'disease': normalized_name,
             'confidence': round(confidence, 2),
             'top_predictions': [],
             'info': disease_info,
@@ -180,16 +348,14 @@ def predict():
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
 
-        # Save history
         prediction_history.append(response)
-
         if len(prediction_history) > 50:
             prediction_history.pop(0)
 
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error in predict route: {e}")
+        print(f"❌ Error in predict route: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -205,10 +371,7 @@ def history():
 def clear_history():
     global prediction_history
     prediction_history = []
-    return jsonify({
-        'success': True,
-        'message': 'History cleared'
-    })
+    return jsonify({'success': True, 'message': 'History cleared'})
 
 
 @app.route('/health')
@@ -216,8 +379,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'hf_connected': True,
-        'model_loaded': model is not None,
-        'classes_loaded': class_names is not None
+        'disease_classes': len(DISEASE_INFO)
     })
 
 
@@ -225,9 +387,9 @@ if __name__ == '__main__':
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
     print("=" * 70)
-    print("PLANT DISEASE DETECTION SYSTEM - STARTING")
-    print("=" * 70)
-    print("🌿 Using Hugging Face API for prediction")
+    print("🌿 PLANT DISEASE DETECTION SYSTEM - STARTING")
+    print(f"✅ Loaded {len(DISEASE_INFO)} disease classes with full info")
+    print("🤖 Using Hugging Face API for prediction")
     print("=" * 70)
 
     port = int(os.environ.get("PORT", 5000))
