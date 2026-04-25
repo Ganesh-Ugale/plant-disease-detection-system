@@ -2,6 +2,8 @@
 Plant Disease Detection System - Flask Backend
 Real-time Plant Leaf Disease Detection Using Deep Learning
 """
+import firebase_admin
+from firebase_admin import credentials, db
 from gradio_client import Client, handle_file
 from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
@@ -11,6 +13,12 @@ from datetime import datetime
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# ================= FIREBASE SETUP =================
+cred = credentials.Certificate("firebase_key.json")  # डाउनलोड from Firebase
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://YOUR_PROJECT_ID.firebaseio.com/'
+})
 
 # Create uploads folder if not exists
 os.makedirs("static/uploads", exist_ok=True)
@@ -356,6 +364,8 @@ def predict():
         }
 
         prediction_history.append(response)
+        # ✅ SAVE TO FIREBASE
+        db.reference('history').push(response)
         if len(prediction_history) > 50:
             prediction_history.pop(0)
 
@@ -368,19 +378,55 @@ def predict():
 
 @app.route('/history')
 def history():
-    return jsonify({
-        'success': True,
-        'history': prediction_history[-10:]
-    })
+    try:
+        ref = db.reference('history')
+        data = ref.get()
+
+        history_list = []
+        if data:
+            history_list = list(data.values())
+
+        return jsonify({
+            'success': True,
+            'history': history_list[-10:]
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 
 @app.route('/clear-history', methods=['POST'])
 def clear_history():
-    global prediction_history
-    prediction_history = []
-    return jsonify({'success': True, 'message': 'History cleared'})
+    try:
+        db.reference('history').delete()   # ✅ DELETE FROM CLOUD
+        return jsonify({
+            'success': True,
+            'message': 'History cleared'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/history-by-date', methods=['POST'])
+def history_by_date():
+    try:
+        selected_date = request.json.get('date')  # format: YYYY-MM-DD
 
+        ref = db.reference('history')
+        data = ref.get()
+
+        filtered = []
+
+        if data:
+            for item in data.values():
+                if item['timestamp'].startswith(selected_date):
+                    filtered.append(item)
+
+        return jsonify({
+            'success': True,
+            'history': filtered
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+        
 @app.route('/health')
 def health():
     return jsonify({
