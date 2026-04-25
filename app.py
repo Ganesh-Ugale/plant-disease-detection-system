@@ -225,6 +225,13 @@ DISEASE_INFO = {
     }
 }
 
+DEFAULT_DISEASE_INFO = {
+    'description': 'Plant disease detected. Consult with an agricultural expert for detailed diagnosis.',
+    'treatment': 'Remove affected leaves, maintain plant hygiene, and apply appropriate treatments based on the specific disease.',
+    'prevention': 'Regular monitoring, proper spacing, adequate nutrition, and water management are key prevention strategies.'
+}
+
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
