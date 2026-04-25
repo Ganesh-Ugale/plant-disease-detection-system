@@ -207,10 +207,19 @@
         <div class="container">
             <div class="history-header">
                 <h2 class="section-title-center">Prediction History</h2>
-                <button class="btn btn-outline" id="clearHistory">
-                    <i class="fas fa-trash"></i>
-                    Clear History
-                </button>
+            
+                <!-- ✅ NEW DATE FILTER -->
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="date" id="historyDate" class="btn btn-outline">
+                    <button class="btn btn-primary" onclick="filterByDate()">
+                        <i class="fas fa-filter"></i> Filter
+                    </button>
+            
+                    <button class="btn btn-outline" id="clearHistory">
+                        <i class="fas fa-trash"></i>
+                        Clear History
+                    </button>
+                </div>
             </div>
             <div class="history-grid" id="historyGrid">
                 <div class="empty-state">
