@@ -111,8 +111,173 @@ function processFile(file) {
         showNotification('File size must be less than 16MB', 'error');
         return;
     }
-    uploadedFile = file;
-    displayImagePreview(file);
+
+    // Show validating message
+    showValidationOverlay('🔍 Validating your image...');
+
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = function() {
+        // Step 1: Blur check
+        const blurScore = getBlurScore(img);
+        if (blurScore < 30) {
+            hideValidationOverlay();
+            URL.revokeObjectURL(url);
+            showSmartWarning(
+                '📷 Blurry Image Detected!',
+                'Your image appears to be too blurry for accurate analysis. Please upload a clear, well-lit photo of the leaf.',
+                'warning',
+                null
+            );
+            return;
+        }
+
+        // Step 2: Leaf/green color check
+        const greenScore = getGreenScore(img);
+        if (greenScore < 8) {
+            hideValidationOverlay();
+            URL.revokeObjectURL(url);
+            showSmartWarning(
+                '🌿 Not a Plant Leaf!',
+                'Oops! This doesn\'t look like a plant leaf image. Our system is trained exclusively on plant leaf photos. Please upload a clear image of a plant leaf.',
+                'error',
+                '/contact'
+            );
+            return;
+        }
+
+        hideValidationOverlay();
+        URL.revokeObjectURL(url);
+        uploadedFile = file;
+        displayImagePreview(file);
+        showNotification('✅ Image validated! Ready to analyze.', 'success');
+    };
+    img.onerror = function() {
+        hideValidationOverlay();
+        showNotification('Could not read image. Please try another file.', 'error');
+    };
+    img.src = url;
+}
+
+// ===================================
+// Image Validation Helpers
+// ===================================
+
+function getBlurScore(img) {
+    const canvas = document.createElement('canvas');
+    const size = 100;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, size, size);
+    const data = ctx.getImageData(0, 0, size, size).data;
+
+    // Laplacian variance — higher = sharper
+    let sum = 0, sumSq = 0, count = 0;
+    for (let i = 0; i < data.length; i += 4) {
+        const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+        sum += gray;
+        sumSq += gray * gray;
+        count++;
+    }
+    const mean = sum / count;
+    const variance = (sumSq / count) - (mean * mean);
+    return Math.sqrt(variance); // higher = sharper
+}
+
+function getGreenScore(img) {
+    const canvas = document.createElement('canvas');
+    const size = 100;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, size, size);
+    const data = ctx.getImageData(0, 0, size, size).data;
+
+    let greenPixels = 0;
+    const total = data.length / 4;
+
+    for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i+1], b = data[i+2];
+        // Check for greenish or brownish/yellowish (plant colors)
+        const isGreen  = g > r * 0.9 && g > b * 0.9 && g > 40;
+        const isBrown  = r > 80 && g > 50 && b < 80 && r > g;
+        const isYellow = r > 150 && g > 150 && b < 100;
+        if (isGreen || isBrown || isYellow) greenPixels++;
+    }
+
+    return (greenPixels / total) * 100;
+}
+
+function showValidationOverlay(message) {
+    let overlay = document.getElementById('validationOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'validationOverlay';
+        overlay.style.cssText = `
+            position:fixed;top:0;left:0;width:100%;height:100%;
+            background:rgba(0,0,0,0.5);z-index:9999;
+            display:flex;align-items:center;justify-content:center;
+            backdrop-filter:blur(4px);
+        `;
+        overlay.innerHTML = `
+            <div style="background:white;padding:2rem 3rem;border-radius:1rem;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                <div style="font-size:2.5rem;margin-bottom:1rem;">🔍</div>
+                <div id="validationMsg" style="font-family:Poppins,sans-serif;font-size:1.1rem;color:#1f2937;font-weight:600;">${message}</div>
+                <div style="margin-top:0.75rem;color:#6b7280;font-size:0.85rem;">Please wait...</div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+}
+
+function hideValidationOverlay() {
+    const overlay = document.getElementById('validationOverlay');
+    if (overlay) overlay.remove();
+}
+
+function showSmartWarning(title, message, type, contactLink) {
+    // Remove existing
+    const existing = document.getElementById('smartWarning');
+    if (existing) existing.remove();
+
+    const colors = {
+        error:   { bg: '#fef2f2', border: '#ef4444', icon: '❌', btn: '#ef4444' },
+        warning: { bg: '#fffbeb', border: '#f59e0b', icon: '⚠️', btn: '#f59e0b' },
+    };
+    const c = colors[type] || colors.error;
+
+    const div = document.createElement('div');
+    div.id = 'smartWarning';
+    div.style.cssText = `
+        position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+        background:white;border-radius:1.25rem;padding:2rem;
+        box-shadow:0 25px 60px rgba(0,0,0,0.25);z-index:9999;
+        max-width:420px;width:90%;text-align:center;
+        border-top:5px solid ${c.border};
+        animation:popIn 0.3s ease;
+        font-family:Poppins,sans-serif;
+    `;
+
+    div.innerHTML = `
+        <div style="font-size:3rem;margin-bottom:0.5rem;">${c.icon}</div>
+        <h3 style="color:#1f2937;margin:0 0 0.75rem;font-size:1.2rem;">${title}</h3>
+        <p style="color:#6b7280;font-size:0.9rem;line-height:1.6;margin:0 0 1.25rem;">${message}</p>
+        ${contactLink ? `<a href="${contactLink}" style="display:inline-block;background:#10b981;color:white;padding:0.5rem 1.25rem;border-radius:9999px;text-decoration:none;font-size:0.85rem;font-weight:600;margin-bottom:0.75rem;">📩 Request to Add Plant</a><br>` : ''}
+        <button onclick="document.getElementById('smartWarning').remove();document.getElementById('fileInput').value='';"
+            style="background:${c.btn};color:white;border:none;padding:0.6rem 1.5rem;border-radius:9999px;cursor:pointer;font-family:Poppins,sans-serif;font-weight:600;font-size:0.9rem;margin-top:0.5rem;">
+            Try Another Image
+        </button>
+    `;
+
+    // Backdrop
+    const backdrop = document.createElement('div');
+    backdrop.id = 'smartWarningBackdrop';
+    backdrop.style.cssText = `position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:9998;backdrop-filter:blur(3px);`;
+    backdrop.onclick = () => { div.remove(); backdrop.remove(); document.getElementById('fileInput').value = ''; };
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(div);
 }
 
 function displayImagePreview(file) {
@@ -181,6 +346,17 @@ async function predictDisease() {
         if (data.success) {
             displayResults(data);
             addToHistory(data);
+            // Low confidence = unknown/unsupported plant
+            if (data.confidence < 50) {
+                setTimeout(() => {
+                    showSmartWarning(
+                        '🌱 Unknown Plant Detected!',
+                        `Our model isn't confident about this plant (${Math.round(data.confidence)}% confidence). This plant may not be in our training dataset yet. You can request to add it!`,
+                        'warning',
+                        '/contact'
+                    );
+                }, 1000);
+            }
         } else {
             showNotification(data.error || 'Prediction failed', 'error');
             predictBtn.style.display = 'block';
@@ -461,6 +637,10 @@ style.textContent = `
     @keyframes fadeOut {
         from { opacity: 1; transform: translateX(0); }
         to   { opacity: 0; transform: translateX(20px); }
+    }
+    @keyframes popIn {
+        from { opacity:0; transform:translate(-50%,-50%) scale(0.8); }
+        to   { opacity:1; transform:translate(-50%,-50%) scale(1); }
     }
     #loading {
         display: none;
