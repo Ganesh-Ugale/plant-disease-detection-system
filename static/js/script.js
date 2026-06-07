@@ -144,6 +144,8 @@ const PLANT_KEYWORDS = [
 // Non-plant keywords to always reject
 const REJECT_KEYWORDS = [
     'person', 'man', 'woman', 'girl', 'boy', 'human', 'face', 'people',
+    'portrait', 'selfie', 'head', 'hair', 'beard', 'nose', 'eye', 'skin',
+    'neck', 'shirt', 'clothes', 'suit', 'dress', 'jacket', 'wall', 'ceiling',
     'laptop', 'computer', 'phone', 'mobile', 'screen', 'monitor', 'keyboard',
     'car', 'vehicle', 'bus', 'truck', 'bicycle', 'motorcycle',
     'building', 'house', 'room', 'office', 'street', 'road',
@@ -204,7 +206,7 @@ async function processFile(file) {
                     const label = topLabels[i];
                     const prob  = topProbs[i];
                     for (const kw of REJECT_KEYWORDS) {
-                        if (label.includes(kw) && prob > 0.15) {
+                        if (label.includes(kw) && prob > 0.08) {
                             rejectReason = label;
                             break;
                         }
@@ -232,14 +234,12 @@ async function processFile(file) {
                     if (isPlant) break;
                 }
 
-                // Also check top prediction probability
-                // If top prediction is plant with >20% confidence, allow
-                if (!isPlant && topProbs[0] > 0.5) {
-                    // High confidence non-plant
+                // If no plant found in top predictions → reject
+                if (!isPlant) {
                     hideValidationOverlay();
                     URL.revokeObjectURL(url);
                     showSmartWarning(
-                        '🌿 Not Recognized as a Plant!',
+                        '🌿 Not Recognized as a Plant Leaf!',
                         `This image doesn't appear to be a plant leaf. Our system only analyzes plant leaf images. If this IS a plant not in our dataset, you can request to add it!`,
                         'error', '/contact'
                     );
@@ -250,7 +250,7 @@ async function processFile(file) {
                 // MobileNet failed to load — fall back to color check
                 console.warn('MobileNet unavailable, using color check fallback');
                 const greenScore = getGreenScore(imgEl);
-                if (greenScore < 8) {
+                if (greenScore < 20) {
                     hideValidationOverlay();
                     URL.revokeObjectURL(url);
                     showSmartWarning(
