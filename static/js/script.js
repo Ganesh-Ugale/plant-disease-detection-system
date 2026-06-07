@@ -65,10 +65,13 @@ function initializeEventListeners() {
     document.addEventListener('dragover', (e) => e.preventDefault());
     document.addEventListener('drop', (e) => e.preventDefault());
 
-    // Also allow clicking anywhere on upload area (not just the label)
+    // Allow clicking anywhere on upload area (not just the label)
+    // But skip if click is on the label or fileInput itself to avoid double dialog
     uploadArea.addEventListener('click', function(e) {
         if (uploadedFile) return; // already has file
         if (e.target.closest('.btn-remove')) return;
+        if (e.target.closest('label')) return; // label already triggers fileInput
+        if (e.target === fileInput) return;
         fileInput.click();
     });
 }
