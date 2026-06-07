@@ -101,7 +101,60 @@ function handleDrop(e) {
     if (file) processFile(file);
 }
 
-function processFile(file) {
+// ===================================
+// MobileNet model instance (loaded once)
+// ===================================
+let mobileNetModel = null;
+let modelLoading = false;
+
+async function loadMobileNet() {
+    if (mobileNetModel) return mobileNetModel;
+    if (modelLoading) {
+        // Wait for existing load
+        while (modelLoading) await new Promise(r => setTimeout(r, 100));
+        return mobileNetModel;
+    }
+    modelLoading = true;
+    try {
+        mobileNetModel = await mobilenet.load({ version: 2, alpha: 1.0 });
+        console.log('✅ MobileNet loaded!');
+    } catch(e) {
+        console.warn('MobileNet load failed:', e);
+        mobileNetModel = null;
+    }
+    modelLoading = false;
+    return mobileNetModel;
+}
+
+// Plant-related keywords MobileNet recognizes
+const PLANT_KEYWORDS = [
+    'leaf', 'plant', 'flower', 'tree', 'vegetable', 'herb', 'shrub',
+    'moss', 'fern', 'grass', 'weed', 'vine', 'bush', 'blossom',
+    'petal', 'stem', 'branch', 'twig', 'foliage', 'crop', 'garden',
+    'nature', 'botanical', 'tomato', 'potato', 'apple', 'grape',
+    'corn', 'maize', 'pepper', 'strawberry', 'peach', 'cherry',
+    'orange', 'raspberry', 'soybean', 'squash', 'blueberry',
+    'cabbage', 'spinach', 'lettuce', 'broccoli', 'cucumber',
+    'zucchini', 'artichoke', 'head cabbage', 'daisy', 'sunflower',
+    'acorn', 'mushroom', 'fungus', 'algae', 'seaweed', 'cactus',
+    'aloe', 'bamboo', 'banana', 'fig', 'mango', 'coconut',
+    'conifer', 'pine', 'oak', 'maple', 'eucalyptus'
+];
+
+// Non-plant keywords to always reject
+const REJECT_KEYWORDS = [
+    'person', 'man', 'woman', 'girl', 'boy', 'human', 'face', 'people',
+    'laptop', 'computer', 'phone', 'mobile', 'screen', 'monitor', 'keyboard',
+    'car', 'vehicle', 'bus', 'truck', 'bicycle', 'motorcycle',
+    'building', 'house', 'room', 'office', 'street', 'road',
+    'dog', 'cat', 'animal', 'bird', 'fish',
+    'food', 'pizza', 'burger', 'sandwich', 'cake', 'bread',
+    'book', 'paper', 'pen', 'table', 'chair', 'furniture',
+    'sky', 'cloud', 'mountain', 'ocean', 'beach', 'sand',
+    'cartoon', 'drawing', 'painting', 'art'
+];
+
+async function processFile(file) {
     const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
     if (!validTypes.includes(file.type)) {
         showNotification('Please upload a valid image file (JPG, PNG, JPEG)', 'error');
@@ -112,51 +165,127 @@ function processFile(file) {
         return;
     }
 
-    // Show validating message
-    showValidationOverlay('🔍 Validating your image...');
+    // Show validating overlay
+    showValidationOverlay('🔍 Checking your image...');
 
-    const img = new Image();
+    const imgEl = new Image();
     const url = URL.createObjectURL(file);
-    img.onload = function() {
-        // Step 1: Blur check
-        const blurScore = getBlurScore(img);
-        if (blurScore < 30) {
+
+    imgEl.onload = async function() {
+        try {
+            // Step 1 — Blur check (fast, no model needed)
+            const blurScore = getBlurScore(imgEl);
+            if (blurScore < 25) {
+                hideValidationOverlay();
+                URL.revokeObjectURL(url);
+                showSmartWarning(
+                    '📷 Image Too Blurry!',
+                    'Your image is too blurry for accurate disease detection. Please upload a clear, well-lit photo of the plant leaf.',
+                    'warning', null
+                );
+                return;
+            }
+
+            // Step 2 — MobileNet AI check
+            showValidationOverlay('🤖 AI is checking if this is a plant...');
+            const model = await loadMobileNet();
+
+            if (model) {
+                const predictions = await model.classify(imgEl, 5);
+                console.log('MobileNet predictions:', predictions);
+
+                // Check top predictions
+                const topLabels = predictions.map(p => p.className.toLowerCase());
+                const topProbs  = predictions.map(p => p.probability);
+
+                // Check for hard reject (non-plant detected with high confidence)
+                let rejectReason = null;
+                for (let i = 0; i < topLabels.length; i++) {
+                    const label = topLabels[i];
+                    const prob  = topProbs[i];
+                    for (const kw of REJECT_KEYWORDS) {
+                        if (label.includes(kw) && prob > 0.15) {
+                            rejectReason = label;
+                            break;
+                        }
+                    }
+                    if (rejectReason) break;
+                }
+
+                if (rejectReason) {
+                    hideValidationOverlay();
+                    URL.revokeObjectURL(url);
+                    showSmartWarning(
+                        '🚫 Not a Plant Leaf!',
+                        `Our AI detected this looks like a "${rejectReason}" image, not a plant leaf. Please upload a clear photo of a plant leaf only.`,
+                        'error', '/contact'
+                    );
+                    return;
+                }
+
+                // Check if plant keywords found
+                let isPlant = false;
+                for (const label of topLabels) {
+                    for (const kw of PLANT_KEYWORDS) {
+                        if (label.includes(kw)) { isPlant = true; break; }
+                    }
+                    if (isPlant) break;
+                }
+
+                // Also check top prediction probability
+                // If top prediction is plant with >20% confidence, allow
+                if (!isPlant && topProbs[0] > 0.5) {
+                    // High confidence non-plant
+                    hideValidationOverlay();
+                    URL.revokeObjectURL(url);
+                    showSmartWarning(
+                        '🌿 Not Recognized as a Plant!',
+                        `This image doesn't appear to be a plant leaf. Our system only analyzes plant leaf images. If this IS a plant not in our dataset, you can request to add it!`,
+                        'error', '/contact'
+                    );
+                    return;
+                }
+
+            } else {
+                // MobileNet failed to load — fall back to color check
+                console.warn('MobileNet unavailable, using color check fallback');
+                const greenScore = getGreenScore(imgEl);
+                if (greenScore < 8) {
+                    hideValidationOverlay();
+                    URL.revokeObjectURL(url);
+                    showSmartWarning(
+                        '🌿 Not a Plant Leaf!',
+                        'This does not look like a plant leaf image. Please upload a clear photo of a plant leaf.',
+                        'error', '/contact'
+                    );
+                    return;
+                }
+            }
+
+            // ✅ All checks passed!
             hideValidationOverlay();
             URL.revokeObjectURL(url);
-            showSmartWarning(
-                '📷 Blurry Image Detected!',
-                'Your image appears to be too blurry for accurate analysis. Please upload a clear, well-lit photo of the leaf.',
-                'warning',
-                null
-            );
-            return;
-        }
+            uploadedFile = file;
+            displayImagePreview(file);
+            showNotification('✅ Plant leaf detected! Ready to analyze.', 'success');
 
-        // Step 2: Leaf/green color check
-        const greenScore = getGreenScore(img);
-        if (greenScore < 8) {
+        } catch (err) {
+            console.error('Validation error:', err);
             hideValidationOverlay();
             URL.revokeObjectURL(url);
-            showSmartWarning(
-                '🌿 Not a Plant Leaf!',
-                'Oops! This doesn\'t look like a plant leaf image. Our system is trained exclusively on plant leaf photos. Please upload a clear image of a plant leaf.',
-                'error',
-                '/contact'
-            );
-            return;
+            // On any error, allow the image (don't block user)
+            uploadedFile = file;
+            displayImagePreview(file);
+            showNotification('✅ Image loaded! Ready to analyze.', 'success');
         }
-
-        hideValidationOverlay();
-        URL.revokeObjectURL(url);
-        uploadedFile = file;
-        displayImagePreview(file);
-        showNotification('✅ Image validated! Ready to analyze.', 'success');
     };
-    img.onerror = function() {
+
+    imgEl.onerror = function() {
         hideValidationOverlay();
         showNotification('Could not read image. Please try another file.', 'error');
     };
-    img.src = url;
+
+    imgEl.src = url;
 }
 
 // ===================================
