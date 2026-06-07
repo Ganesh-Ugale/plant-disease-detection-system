@@ -9,7 +9,16 @@ from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 import os
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
 from datetime import datetime
+
+# ================= GMAIL CONFIG =================
+GMAIL_USER  = os.environ.get("GMAIL_USER", "ugale.ganesh.d@gmail.com")
+GMAIL_PASS  = os.environ.get("GMAIL_PASS", "")
+ADMIN_EMAIL = "ugale.ganesh.d@gmail.com"
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -444,7 +453,141 @@ def history_by_date():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
         
-@app.route('/health')
+@app.route('/contact')
+def contact():
+    return render_template('contact.html')
+
+
+def send_admin_email(name, email, plant_name, disease_name, description, img_path=None):
+    """Send contact request email to admin via Gmail SMTP."""
+    try:
+        msg = MIMEMultipart('related')
+        msg['Subject'] = f"🌿 New Plant Request: {plant_name} | Plant Disease Detection"
+        msg['From']    = GMAIL_USER
+        msg['To']      = ADMIN_EMAIL
+        msg['Reply-To'] = email
+
+        html_body = f"""
+        <html><body style="font-family:Arial,sans-serif;background:#f0fdf4;padding:20px;">
+        <div style="max-width:600px;margin:0 auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+
+            <div style="background:linear-gradient(135deg,#065f46,#10b981);padding:30px;text-align:center;">
+                <h1 style="color:white;margin:0;font-size:22px;">🌿 New Plant Addition Request</h1>
+                <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Plant Disease Detection System</p>
+            </div>
+
+            <div style="padding:30px;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <tr>
+                        <td style="padding:10px;background:#f9fafb;border-radius:8px;font-weight:bold;color:#065f46;width:140px;">👤 Name</td>
+                        <td style="padding:10px;color:#1f2937;">{name}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:10px;font-weight:bold;color:#065f46;">📧 Email</td>
+                        <td style="padding:10px;color:#1f2937;"><a href="mailto:{email}">{email}</a></td>
+                    </tr>
+                    <tr>
+                        <td style="padding:10px;background:#f9fafb;border-radius:8px;font-weight:bold;color:#065f46;">🌱 Plant Name</td>
+                        <td style="padding:10px;color:#1f2937;font-weight:600;">{plant_name}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:10px;font-weight:bold;color:#065f46;">🦠 Disease</td>
+                        <td style="padding:10px;color:#1f2937;">{disease_name or 'Not specified'}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:10px;background:#f9fafb;border-radius:8px;font-weight:bold;color:#065f46;vertical-align:top;">📝 Description</td>
+                        <td style="padding:10px;color:#1f2937;line-height:1.6;">{description}</td>
+                    </tr>
+                </table>
+
+                {'<div style="margin-top:20px;"><p style="font-weight:bold;color:#065f46;">📷 Sample Image:</p><img src="cid:sample_image" style="max-width:100%;border-radius:8px;margin-top:8px;"></div>' if img_path else ''}
+
+                <div style="margin-top:25px;padding:15px;background:#f0fdf4;border-radius:8px;border-left:4px solid #10b981;">
+                    <p style="margin:0;color:#065f46;font-size:13px;">⚡ Reply directly to this email to contact the user at <strong>{email}</strong></p>
+                </div>
+            </div>
+
+            <div style="padding:15px;background:#f9fafb;text-align:center;">
+                <p style="margin:0;color:#9ca3af;font-size:12px;">Plant Disease Detection System | BE Computer Engineering Project 2026</p>
+            </div>
+        </div>
+        </body></html>
+        """
+
+        msg.attach(MIMEText(html_body, 'html'))
+
+        # Attach image inline if provided
+        if img_path and os.path.exists(img_path):
+            with open(img_path, 'rb') as f:
+                img_data = f.read()
+            img_attachment = MIMEImage(img_data)
+            img_attachment.add_header('Content-ID', '<sample_image>')
+            img_attachment.add_header('Content-Disposition', 'inline', filename=os.path.basename(img_path))
+            msg.attach(img_attachment)
+
+        # Send via Gmail SMTP
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(GMAIL_USER, GMAIL_PASS)
+            server.send_message(msg)
+
+        print("✅ Admin email sent successfully!")
+        return True
+
+    except Exception as e:
+        print(f"❌ Email send failed: {e}")
+        return False
+
+
+@app.route('/submit-contact', methods=['POST'])
+def submit_contact():
+    try:
+        data        = request.form
+        name        = data.get('name', '')
+        email       = data.get('email', '')
+        plant_name  = data.get('plant_name', '')
+        disease_name= data.get('disease_name', '')
+        description = data.get('description', '')
+        timestamp   = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        img_path = None
+
+        # Handle image upload
+        if 'image' in request.files:
+            img_file = request.files['image']
+            if img_file and img_file.filename:
+                img_filename = secure_filename(img_file.filename)
+                img_filename = f"contact_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{img_filename}"
+                img_path = os.path.join(app.config['UPLOAD_FOLDER'], img_filename)
+                img_file.save(img_path)
+
+        # Save to Firebase
+        contact_data = {
+            'name': name,
+            'email': email,
+            'plant_name': plant_name,
+            'disease_name': disease_name,
+            'description': description,
+            'timestamp': timestamp,
+            'status': 'pending',
+            'image_url': f'/static/uploads/{os.path.basename(img_path)}' if img_path else ''
+        }
+        db.reference('contact_requests').push(contact_data)
+
+        # Send email to admin
+        email_sent = send_admin_email(name, email, plant_name, disease_name, description, img_path)
+
+        return jsonify({
+            'success': True,
+            'message': 'Request submitted successfully!',
+            'email_sent': email_sent
+        })
+
+    except Exception as e:
+        print(f"❌ submit_contact error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+
 def health():
     return jsonify({
         'status': 'healthy',
