@@ -1035,20 +1035,20 @@
     // 🔥 SAME FIREBASE CONFIG AS login.html
     // =============================================
     const firebaseConfig = {
-        apiKey: "YOUR_API_KEY",
-        authDomain: "YOUR_PROJECT.firebaseapp.com",
+        apiKey: "AIzaSyBPFEYMziCCCyr4FBod_Nhz82os_9XXaA8",
+        authDomain: "plant-disease-history.firebaseapp.com",
         databaseURL: "https://plant-disease-history-default-rtdb.asia-southeast1.firebasedatabase.app",
-        projectId: "YOUR_PROJECT_ID",
-        storageBucket: "YOUR_PROJECT.appspot.com",
-        messagingSenderId: "YOUR_SENDER_ID",
-        appId: "YOUR_APP_ID"
+        projectId: "plant-disease-history",
+        storageBucket: "plant-disease-history.firebasestorage.app",
+        messagingSenderId: "450353943942",
+        appId: "1:450353943942:web:ca6e6a35fa7d2b1a214807"
     };
 
     const fbApp = initializeApp(firebaseConfig);
     const auth = getAuth(fbApp);
     const db = getDatabase(fbApp);
 
-    const ADMIN_EMAIL = "admin@plantdisease.com"; // 🔥 Must match login.html
+    const ADMIN_EMAIL = "ugale.ganesh.d@gmail.com"; // 🔥 Must match login.html
 
     // ---- Auth guard ----
     onAuthStateChanged(auth, async (user) => {
